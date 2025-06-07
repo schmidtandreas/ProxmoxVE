@@ -6,7 +6,7 @@
 # License: MIT | https://github.com/community-scripts/ProxmoxVE/raw/main/LICENSE
 # Source: https://frigate.video/
 
-source /dev/stdin <<<"$FUNCTIONS_FILE_PATH"
+source /dev/stdin <<< "$FUNCTIONS_FILE_PATH"
 color
 verb_ip6
 catch_errors
@@ -15,7 +15,7 @@ network_check
 update_os
 
 msg_info "Installing Dependencies (Patience)"
-$STD apt-get install -y {git,ca-certificates,automake,build-essential,xz-utils,libtool,ccache,pkg-config,libgtk-3-dev,libavcodec-dev,libavformat-dev,libswscale-dev,libv4l-dev,libxvidcore-dev,libx264-dev,libjpeg-dev,libpng-dev,libtiff-dev,gfortran,openexr,libatlas-base-dev,libssl-dev,libtbb2,libtbb-dev,libdc1394-22-dev,libopenexr-dev,libgstreamer-plugins-base1.0-dev,libgstreamer1.0-dev,gcc,gfortran,libopenblas-dev,liblapack-dev,libusb-1.0-0-dev,jq,moreutils}
+$STD apt-get install -y {git,ca-certificates,automake,build-essential,xz-utils,libtool,ccache,pkg-config,libgtk-3-dev,libavcodec-dev,libavformat-dev,libswscale-dev,libv4l-dev,libxvidcore-dev,libx264-dev,libjpeg-dev,libpng-dev,libtiff-dev,gfortran,openexr,libatlas-base-dev,libssl-dev,libtbb2,libtbb-dev,libdc1394-22-dev,libopenexr-dev,libgstreamer-plugins-base1.0-dev,libgstreamer1.0-dev,gcc,gfortran,libopenblas-dev,liblapack-dev,libusb-1.0-0-dev,jq,moreutils,tclsh}
 msg_ok "Installed Dependencies"
 
 msg_info "Setup Python3"
@@ -42,16 +42,17 @@ if [[ "$CTTYPE" == "0" ]]; then
 fi
 msg_ok "Set Up Hardware Acceleration"
 
-#RELEASE=$(curl -fsSL https://api.github.com/repos/blakeblackshear/frigate/releases/latest | jq -r '.tag_name')
+RELEASE=$(curl -fsSL https://api.github.com/repos/blakeblackshear/frigate/releases/latest | jq -r '.tag_name')
 msg_ok "Stop spinner to prevent segmentation fault"
-msg_info "Installing Frigate v0.14.1 (Perseverance)"
-if [ -n "$SPINNER_PID" ] && ps -p $SPINNER_PID >/dev/null; then kill $SPINNER_PID >/dev/null; fi
+msg_info "Installing Frigate $RELEASE (Perseverance)"
+if [ -n "$SPINNER_PID" ] && ps -p $SPINNER_PID > /dev/null; then kill $SPINNER_PID > /dev/null; fi
 cd ~
 mkdir -p /opt/frigate/models
-curl -fsSL "https://github.com/blakeblackshear/frigate/archive/refs/tags/v0.14.1.tar.gz" -o "frigate.tar.gz"
+curl -fsSL "https://github.com/blakeblackshear/frigate/archive/refs/tags/${RELEASE}.tar.gz" -o "frigate.tar.gz"
 tar -xzf frigate.tar.gz -C /opt/frigate --strip-components 1
 rm -rf frigate.tar.gz
 cd /opt/frigate
+$STD /opt/frigate/docker/main/build_pysqlite3.sh
 $STD pip3 wheel --wheel-dir=/wheels -r /opt/frigate/docker/main/requirements-wheels.txt
 cp -a /opt/frigate/docker/main/rootfs/. /
 export TARGETARCH="amd64"
@@ -67,11 +68,13 @@ $STD /opt/frigate/.devcontainer/initialize.sh
 $STD make version
 cd /opt/frigate/web
 $STD npm install
-$STD npm run build
+$STD npm run build &&
+  mv dist/BASE_PATH/monacoeditorwork/* dist/asserts/ &&
+  rm dist/BASE_PATH
 cp -r /opt/frigate/web/dist/* /opt/frigate/web/
 cp -r /opt/frigate/config/. /config
 sed -i '/^s6-svc -O \.$/s/^/#/' /opt/frigate/docker/main/rootfs/etc/s6-overlay/s6-rc.d/frigate/run
-cat <<EOF >/config/config.yml
+cat << EOF > /config/config.yml
 mqtt:
   enabled: false
 cameras:
@@ -95,7 +98,7 @@ if [[ "$CTTYPE" == "0" ]]; then
 else
   sed -i -e 's/^kvm:x:104:$/render:x:104:frigate/' -e 's/^render:x:105:$/kvm:x:105:/' /etc/group
 fi
-echo "tmpfs   /tmp/cache      tmpfs   defaults        0       0" >>/etc/fstab
+echo "tmpfs   /tmp/cache      tmpfs   defaults        0       0" >> /etc/fstab
 msg_ok "Installed Frigate"
 
 if grep -q -o -m1 -E 'avx[^ ]*' /proc/cpuinfo; then
@@ -110,7 +113,7 @@ if grep -q -o -m1 -E 'avx[^ ]*' /proc/cpuinfo; then
   cp -r /opt/frigate/models/public/ssdlite_mobilenet_v2 openvino-model
   curl -fsSL "https://github.com/openvinotoolkit/open_model_zoo/raw/master/data/dataset_classes/coco_91cl_bkgr.txt" -o "openvino-model/coco_91cl_bkgr.txt"
   sed -i 's/truck/car/g' openvino-model/coco_91cl_bkgr.txt
-  cat <<EOF >>/config/config.yml
+  cat << EOF >> /config/config.yml
 detectors:
   ov:
     type: openvino
@@ -126,7 +129,7 @@ model:
 EOF
   msg_ok "Installed Openvino Object Detection Model"
 else
-  cat <<EOF >>/config/config.yml
+  cat << EOF >> /config/config.yml
 model:
   path: /cpu_model.tflite
 EOF
@@ -175,7 +178,7 @@ ln -sf /usr/local/tempio/bin/tempio /usr/local/bin/tempio
 msg_ok "Installed Tempio"
 
 msg_info "Creating Services"
-cat <<EOF >/etc/systemd/system/create_directories.service
+cat << EOF > /etc/systemd/system/create_directories.service
 [Unit]
 Description=Create necessary directories for logs
 
@@ -188,7 +191,7 @@ WantedBy=multi-user.target
 EOF
 systemctl enable -q --now create_directories
 sleep 3
-cat <<EOF >/etc/systemd/system/go2rtc.service
+cat << EOF > /etc/systemd/system/go2rtc.service
 [Unit]
 Description=go2rtc service
 After=network.target
@@ -210,7 +213,7 @@ WantedBy=multi-user.target
 EOF
 systemctl enable -q --now go2rtc
 sleep 3
-cat <<EOF >/etc/systemd/system/frigate.service
+cat << EOF > /etc/systemd/system/frigate.service
 [Unit]
 Description=Frigate service
 After=go2rtc.service
@@ -233,7 +236,7 @@ WantedBy=multi-user.target
 EOF
 systemctl enable -q --now frigate
 sleep 3
-cat <<EOF >/etc/systemd/system/nginx.service
+cat << EOF > /etc/systemd/system/nginx.service
 [Unit]
 Description=Nginx service
 After=frigate.service
